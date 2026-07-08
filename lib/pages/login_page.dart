@@ -55,7 +55,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      drawer: const SettingsDrawer(),
+      drawer: const SettingsDrawer(username: 'guest'),
       body: DecoratedBox(
         decoration: BoxDecoration(
           gradient: LinearGradient(

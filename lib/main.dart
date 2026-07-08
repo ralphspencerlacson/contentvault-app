@@ -20,6 +20,8 @@ part 'models/uploaded_video.dart';
 part 'pages/creator_page.dart';
 part 'pages/fullscreen_video_page.dart';
 part 'pages/login_page.dart';
+part 'pages/profile_page.dart';
+part 'pages/settings_page.dart';
 part 'pages/subscriber_page.dart';
 part 'pages/watch_video_page.dart';
 part 'requests/mux_client.dart';

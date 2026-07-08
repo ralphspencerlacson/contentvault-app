@@ -70,127 +70,145 @@ class VideoListTile extends StatelessWidget {
       onVisibilityChanged: (info) {
         if (info.visibleFraction > 0.72) onPreviewVisible();
       },
-      child: Card(
-        clipBehavior: Clip.antiAlias,
-        margin: const EdgeInsets.only(bottom: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            InkWell(
-              onTap: onTap,
-              child: AspectRatio(
-                aspectRatio: 16 / 9,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    previewing
-                        ? VideoPreviewThumbnail(video: video)
-                        : VideoPoster(video: video),
-                    Positioned(
-                      left: 12,
-                      bottom: 12,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.62),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                previewing
-                                    ? Icons.volume_off
-                                    : Icons.play_arrow,
-                                color: Colors.white,
-                                size: 16,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: Theme.of(
+                context,
+              ).colorScheme.outline.withValues(alpha: 0.10),
+            ),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: onTap,
+                    child: AspectRatio(
+                      aspectRatio: 16 / 9,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          previewing
+                              ? VideoPreviewThumbnail(video: video)
+                              : VideoPoster(video: video),
+                          Positioned(
+                            left: 12,
+                            bottom: 12,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.62),
+                                borderRadius: BorderRadius.circular(999),
                               ),
-                              const SizedBox(width: 6),
-                              Text(
-                                previewing ? 'Previewing' : 'Tap to watch',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      previewing
+                                          ? Icons.volume_off
+                                          : Icons.play_arrow,
+                                      color: Colors.white,
+                                      size: 16,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      previewing
+                                          ? 'Previewing'
+                                          : 'Tap to watch',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(2, 12, 2, 0),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: onCreatorTap,
+                      child: CircleAvatar(
+                        radius: 18,
+                        child: Text(video.creator[video.creator.length - 1]),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          InkWell(
+                            onTap: onTap,
+                            child: Text(
+                              video.displayTitle,
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          InkWell(
+                            onTap: onCreatorTap,
+                            child: Text(
+                              '${video.creator} • ${video.formattedUploadDate}',
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.visibility_outlined,
+                                size: 16,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(video.viewsLabel),
+                              const SizedBox(width: 14),
+                              Icon(
+                                Icons.favorite,
+                                size: 16,
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(video.heartsLabel),
                             ],
                           ),
-                        ),
+                        ],
                       ),
+                    ),
+                    const SizedBox(width: 12),
+                    IconButton(
+                      tooltip: 'More',
+                      onPressed: onMoreTap,
+                      icon: const Icon(Icons.more_vert),
                     ),
                   ],
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  InkWell(
-                    customBorder: const CircleBorder(),
-                    onTap: onCreatorTap,
-                    child: CircleAvatar(
-                      radius: 18,
-                      child: Text(video.creator[video.creator.length - 1]),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        InkWell(
-                          onTap: onTap,
-                          child: Text(
-                            video.displayTitle,
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        InkWell(
-                          onTap: onCreatorTap,
-                          child: Text(
-                            '${video.creator} • ${video.formattedUploadDate}',
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.visibility_outlined,
-                              size: 16,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(video.viewsLabel),
-                            const SizedBox(width: 14),
-                            Icon(
-                              Icons.favorite,
-                              size: 16,
-                              color: Theme.of(context).colorScheme.error,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(video.heartsLabel),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  IconButton(
-                    tooltip: 'More',
-                    onPressed: onMoreTap,
-                    icon: const Icon(Icons.more_vert),
-                  ),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

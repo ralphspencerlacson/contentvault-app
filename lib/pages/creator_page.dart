@@ -23,9 +23,12 @@ class _CreatorScreenState extends State<CreatorScreen> {
   Uint8List? _selectedBytes;
   UploadProgress? _progress;
   bool _showUploadForm = false;
+  bool _showMyVideos = false;
   bool _pickingVideo = false;
   bool _uploading = false;
   bool _creatorMiniPlayer = false;
+  bool _showCreatorHomeSearch = false;
+  bool _showMyVideosSearch = false;
   int _uploadStep = 0;
   String? _creatorPreviewPlaybackId;
   String? _message;
@@ -143,27 +146,86 @@ class _CreatorScreenState extends State<CreatorScreen> {
     }
   }
 
-  void _showVideoMenu(UploadedVideo video) {
+  void _showMyVideoMenu(UploadedVideo video) {
     showModalBottomSheet<void>(
       context: context,
       builder: (context) => const SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit')),
             ListTile(
-              leading: Icon(Icons.bookmark_add_outlined),
-              title: Text('Save to watchlist'),
+              leading: Icon(Icons.delete_outline),
+              title: Text('Delete'),
             ),
-            ListTile(
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showHomepageVideoMenu(UploadedVideo video) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              leading: Icon(Icons.bookmark_add_outlined),
+              title: Text('Watch later'),
+            ),
+            const ListTile(
               leading: Icon(Icons.favorite_border),
               title: Text('Favorite video'),
             ),
-            ListTile(leading: Icon(Icons.person), title: Text('View creator')),
             ListTile(
+              leading: const Icon(Icons.person),
+              title: Text('View ${video.creator}'),
+              onTap: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => CreatorVideosScreen(
+                      creator: video.creator,
+                      onPlay: _playUploadedVideo,
+                    ),
+                  ),
+                );
+              },
+            ),
+            const ListTile(
               leading: Icon(Icons.visibility_off_outlined),
               title: Text('Hide'),
             ),
+            const ListTile(
+              leading: Icon(Icons.flag_outlined),
+              title: Text('Report'),
+            ),
           ],
+        ),
+      ),
+    );
+  }
+
+  void _openCreatorDirectory() {
+    Navigator.of(context).pop();
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CreatorDirectoryScreen(
+          onOpenCreator: (creator) {
+            Future<void>.microtask(() {
+              if (!mounted) return;
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => CreatorVideosScreen(
+                    creator: creator,
+                    onPlay: _playUploadedVideo,
+                  ),
+                ),
+              );
+            });
+          },
         ),
       ),
     );
@@ -415,6 +477,7 @@ class _CreatorScreenState extends State<CreatorScreen> {
 
   void _openUploadForm() {
     setState(() {
+      _showMyVideos = true;
       _showUploadForm = true;
       _message = null;
     });
@@ -456,18 +519,46 @@ class _CreatorScreenState extends State<CreatorScreen> {
         if (!didPop && !_uploading && _showUploadForm) _closeUploadForm();
       },
       child: Scaffold(
-        drawer: const SettingsDrawer(),
+        drawer: SettingsDrawer(
+          username: widget.username,
+          role: 'creator',
+          onVideosTap: () {
+            Navigator.of(context).pop();
+            setState(() {
+              _showMyVideos = false;
+              _showUploadForm = false;
+            });
+          },
+          onCreatorsTap: _openCreatorDirectory,
+          onMyVideosTap: () {
+            Navigator.of(context).pop();
+            setState(() => _showMyVideos = true);
+          },
+          onLogout: _logout,
+        ),
         appBar: AppBar(
-          title: const Text('Creator Studio'),
+          title: _showCreatorHomeSearch && !_showMyVideos && !_showUploadForm
+              ? const TextField(
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    hintText: 'Search videos...',
+                    border: InputBorder.none,
+                  ),
+                )
+              : Text(
+                  _showMyVideos || _showUploadForm
+                      ? 'Creator Studio'
+                      : 'Homepage',
+                ),
           actions: [
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ActionChip(
-                avatar: const Icon(Icons.person, size: 18),
-                label: Text(widget.username),
-                onPressed: _logout,
+            if (!_showMyVideos && !_showUploadForm)
+              IconButton(
+                tooltip: 'Search',
+                onPressed: () => setState(
+                  () => _showCreatorHomeSearch = !_showCreatorHomeSearch,
+                ),
+                icon: Icon(_showCreatorHomeSearch ? Icons.close : Icons.search),
               ),
-            ),
           ],
         ),
         body: SafeArea(
@@ -501,13 +592,101 @@ class _CreatorScreenState extends State<CreatorScreen> {
                     },
                     child: _showUploadForm
                         ? _buildUploadForm()
-                        : _buildMyVideos(),
+                        : _showMyVideos
+                        ? _buildMyVideos()
+                        : _buildCreatorHomepage(),
                   ),
                 ),
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildCreatorHomepage() {
+    final latestVideos = [...uploadedVideos]
+      ..sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
+    final creators = latestVideos.map((video) => video.creator).toSet();
+
+    return Padding(
+      key: const ValueKey('creator-homepage'),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Latest videos',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final creator in creators)
+                ActionChip(
+                  avatar: const Icon(Icons.verified, size: 18),
+                  label: Text(creator),
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => CreatorVideosScreen(
+                          creator: creator,
+                          onPlay: _playUploadedVideo,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              if (creators.isEmpty)
+                const Chip(label: Text('Waiting for uploads')),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Expanded(
+            child: latestVideos.isEmpty
+                ? const Center(
+                    child: Text(
+                      'No uploaded videos are available in this app session.',
+                    ),
+                  )
+                : ListView(
+                    padding: EdgeInsets.only(
+                      bottom: _creatorMiniPlayer ? 170 : 0,
+                    ),
+                    children: [
+                      for (final video in latestVideos)
+                        VideoListTile(
+                          video: video,
+                          previewing:
+                              _creatorPreviewPlaybackId == video.playbackId,
+                          onPreviewVisible: () {
+                            if (_creatorPreviewPlaybackId != video.playbackId) {
+                              setState(
+                                () => _creatorPreviewPlaybackId =
+                                    video.playbackId,
+                              );
+                            }
+                          },
+                          onTap: () => _playUploadedVideo(video),
+                          onCreatorTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => CreatorVideosScreen(
+                                  creator: video.creator,
+                                  onPlay: _playUploadedVideo,
+                                ),
+                              ),
+                            );
+                          },
+                          onMoreTap: () => _showHomepageVideoMenu(video),
+                        ),
+                    ],
+                  ),
+          ),
+        ],
       ),
     );
   }
@@ -528,19 +707,36 @@ class _CreatorScreenState extends State<CreatorScreen> {
               Row(
                 children: [
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${widget.username} Studio',
-                          style: Theme.of(context).textTheme.headlineSmall,
-                        ),
-                        Text(
-                          myVideos.isEmpty
-                              ? 'Draft your first subscriber-ready upload.'
-                              : '${myVideos.length} published ${myVideos.length == 1 ? 'video' : 'videos'} in this session',
-                        ),
-                      ],
+                    child: _showMyVideosSearch
+                        ? const TextField(
+                            autofocus: true,
+                            decoration: InputDecoration(
+                              hintText: 'Search my videos...',
+                              border: InputBorder.none,
+                            ),
+                          )
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'My Videos',
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                              Text(
+                                myVideos.isEmpty
+                                    ? 'Draft your first subscriber-ready upload.'
+                                    : '${myVideos.length} published ${myVideos.length == 1 ? 'video' : 'videos'} in this session',
+                              ),
+                            ],
+                          ),
+                  ),
+                  IconButton(
+                    tooltip: 'Search',
+                    onPressed: () => setState(
+                      () => _showMyVideosSearch = !_showMyVideosSearch,
+                    ),
+                    icon: Icon(
+                      _showMyVideosSearch ? Icons.close : Icons.search,
                     ),
                   ),
                   FilledButton.icon(
@@ -608,7 +804,7 @@ class _CreatorScreenState extends State<CreatorScreen> {
                               }
                             },
                             onTap: () => _playUploadedVideo(video),
-                            onMoreTap: () => _showVideoMenu(video),
+                            onMoreTap: () => _showMyVideoMenu(video),
                           );
                         },
                       ),
