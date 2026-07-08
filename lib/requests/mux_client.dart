@@ -16,6 +16,11 @@ class MuxClient {
 
   Future<MuxDirectUpload> createDirectUpload({required String title}) async {
     final safeTitle = title.trim().replaceAll(RegExp(r'[^A-Za-z0-9 ._-]'), ' ');
+    final muxTitle = safeTitle.isEmpty
+        ? 'Untitled video'
+        : safeTitle.length <= 120
+        ? safeTitle
+        : safeTitle.substring(0, 120);
     final response = await http.post(
       Uri.parse('$_apiBase/uploads'),
       headers: _headers,
@@ -23,9 +28,8 @@ class MuxClient {
         'cors_origin': 'https://content-vault.local',
         'new_asset_settings': {
           'playback_policy': ['public'],
-          'passthrough': safeTitle.length <= 120
-              ? safeTitle
-              : safeTitle.substring(0, 120),
+          'passthrough': muxTitle,
+          'meta': {'title': muxTitle},
         },
       }),
     );

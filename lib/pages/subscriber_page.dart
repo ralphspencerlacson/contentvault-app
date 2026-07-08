@@ -17,6 +17,7 @@ class _SubscriberScreenState extends State<SubscriberScreen> {
 
   @override
   void dispose() {
+    _hideMiniPlayer();
     _controller?.dispose();
     super.dispose();
   }
@@ -37,18 +38,17 @@ class _SubscriberScreenState extends State<SubscriberScreen> {
     await oldController?.dispose();
 
     final action = await navigator.push<WatchExitAction>(
-      MaterialPageRoute<WatchExitAction>(
-        builder: (_) => WatchVideoScreen(
-          video: video,
-          controller: controller,
-          initializeFuture: initializeFuture,
-        ),
+      watchVideoRoute(
+        video: video,
+        controller: controller,
+        initializeFuture: initializeFuture,
       ),
     );
 
     if (!mounted) return;
     if (action == WatchExitAction.minimize) {
       setState(() => _miniPlayer = true);
+      _showMiniPlayer();
     } else {
       await _closePlayer();
     }
@@ -60,20 +60,21 @@ class _SubscriberScreenState extends State<SubscriberScreen> {
     if (controller == null || video == null) return;
 
     final navigator = Navigator.of(context);
+    _hideMiniPlayer();
     setState(() => _miniPlayer = false);
     final action = await navigator.push<WatchExitAction>(
-      MaterialPageRoute<WatchExitAction>(
-        builder: (_) => WatchVideoScreen(
-          video: video,
-          controller: controller,
-          initializeFuture: Future<void>.value(),
-        ),
+      watchVideoRoute(
+        video: video,
+        controller: controller,
+        initializeFuture: Future<void>.value(),
+        expandFromMini: true,
       ),
     );
 
     if (!mounted) return;
     if (action == WatchExitAction.minimize) {
       setState(() => _miniPlayer = true);
+      _showMiniPlayer();
     } else {
       await _closePlayer();
     }
@@ -81,12 +82,32 @@ class _SubscriberScreenState extends State<SubscriberScreen> {
 
   Future<void> _closePlayer() async {
     final oldController = _controller;
+    _hideMiniPlayer();
     setState(() {
       _controller = null;
       _selectedVideo = null;
       _miniPlayer = false;
     });
     await oldController?.dispose();
+  }
+
+  void _showMiniPlayer() {
+    final video = _selectedVideo;
+    final controller = _controller;
+    if (video == null || controller == null) return;
+
+    appMiniPlayer.value = AppMiniPlayer(
+      video: video,
+      controller: controller,
+      onExpand: _expandMiniPlayer,
+      onClose: _closePlayer,
+    );
+  }
+
+  void _hideMiniPlayer() {
+    if (appMiniPlayer.value?.controller == _controller) {
+      appMiniPlayer.value = null;
+    }
   }
 
   Future<void> _logout() async {
@@ -137,8 +158,6 @@ class _SubscriberScreenState extends State<SubscriberScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final controller = _controller;
-    final selectedVideo = _selectedVideo;
     final latestVideos = [...uploadedVideos]
       ..sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
     final creators = latestVideos.map((video) => video.creator).toSet();
@@ -240,19 +259,6 @@ class _SubscriberScreenState extends State<SubscriberScreen> {
                         ],
                       ),
                     ),
-                    if (_miniPlayer &&
-                        selectedVideo != null &&
-                        controller != null)
-                      Positioned(
-                        right: 16,
-                        bottom: 16,
-                        child: MiniVideoPlayer(
-                          video: selectedVideo,
-                          controller: controller,
-                          onExpand: _expandMiniPlayer,
-                          onClose: _closePlayer,
-                        ),
-                      ),
                   ],
                 ),
               ),

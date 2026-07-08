@@ -19,6 +19,7 @@ class _CreatorScreenState extends State<CreatorScreen> {
   VideoPlayerController? _creatorPlaybackController;
   PlatformFile? _selectedFile;
   UploadedVideo? _selectedUploadedVideo;
+  UploadedVideo? _completedUploadVideo;
   Uint8List? _selectedBytes;
   UploadProgress? _progress;
   bool _showUploadForm = false;
@@ -30,6 +31,7 @@ class _CreatorScreenState extends State<CreatorScreen> {
   String? _message;
   String? _fileSelectionError;
   double? _selectedAspectRatio;
+  bool _uploadFailed = false;
 
   bool get _selectedRatioIsValid =>
       _selectedAspectRatio != null &&
@@ -45,6 +47,7 @@ class _CreatorScreenState extends State<CreatorScreen> {
 
   @override
   void dispose() {
+    _hideCreatorMiniPlayer();
     _previewController?.dispose();
     _creatorPlaybackController?.dispose();
     _uploadDialogData.dispose();
@@ -68,18 +71,17 @@ class _CreatorScreenState extends State<CreatorScreen> {
     await oldController?.dispose();
 
     final action = await navigator.push<WatchExitAction>(
-      MaterialPageRoute<WatchExitAction>(
-        builder: (_) => WatchVideoScreen(
-          video: video,
-          controller: controller,
-          initializeFuture: initializeFuture,
-        ),
+      watchVideoRoute(
+        video: video,
+        controller: controller,
+        initializeFuture: initializeFuture,
       ),
     );
 
     if (!mounted) return;
     if (action == WatchExitAction.minimize) {
       setState(() => _creatorMiniPlayer = true);
+      _showCreatorMiniPlayer();
     } else {
       await _closeCreatorPlayer();
     }
@@ -91,20 +93,21 @@ class _CreatorScreenState extends State<CreatorScreen> {
     if (controller == null || video == null) return;
 
     final navigator = Navigator.of(context);
+    _hideCreatorMiniPlayer();
     setState(() => _creatorMiniPlayer = false);
     final action = await navigator.push<WatchExitAction>(
-      MaterialPageRoute<WatchExitAction>(
-        builder: (_) => WatchVideoScreen(
-          video: video,
-          controller: controller,
-          initializeFuture: Future<void>.value(),
-        ),
+      watchVideoRoute(
+        video: video,
+        controller: controller,
+        initializeFuture: Future<void>.value(),
+        expandFromMini: true,
       ),
     );
 
     if (!mounted) return;
     if (action == WatchExitAction.minimize) {
       setState(() => _creatorMiniPlayer = true);
+      _showCreatorMiniPlayer();
     } else {
       await _closeCreatorPlayer();
     }
@@ -112,12 +115,32 @@ class _CreatorScreenState extends State<CreatorScreen> {
 
   Future<void> _closeCreatorPlayer() async {
     final oldController = _creatorPlaybackController;
+    _hideCreatorMiniPlayer();
     setState(() {
       _creatorPlaybackController = null;
       _selectedUploadedVideo = null;
       _creatorMiniPlayer = false;
     });
     await oldController?.dispose();
+  }
+
+  void _showCreatorMiniPlayer() {
+    final video = _selectedUploadedVideo;
+    final controller = _creatorPlaybackController;
+    if (video == null || controller == null) return;
+
+    appMiniPlayer.value = AppMiniPlayer(
+      video: video,
+      controller: controller,
+      onExpand: _expandCreatorMiniPlayer,
+      onClose: _closeCreatorPlayer,
+    );
+  }
+
+  void _hideCreatorMiniPlayer() {
+    if (appMiniPlayer.value?.controller == _creatorPlaybackController) {
+      appMiniPlayer.value = null;
+    }
   }
 
   void _showVideoMenu(UploadedVideo video) {
@@ -284,12 +307,12 @@ class _CreatorScreenState extends State<CreatorScreen> {
     setState(() => _uploading = true);
     _setUploadStatus(
       progress: const UploadProgress(sentBytes: 0, totalBytes: 0),
-      message: 'Creating Mux direct upload...',
+      message: 'Preparing your upload...',
     );
 
     try {
       final upload = await _muxClient.createDirectUpload(title: videoTitle);
-      _setUploadStatus(message: 'Uploading video to Mux...');
+      _setUploadStatus(message: 'Uploading your video...');
 
       await _muxClient.uploadVideo(
         upload.url,
@@ -297,24 +320,27 @@ class _CreatorScreenState extends State<CreatorScreen> {
         onProgress: (progress) => _setUploadStatus(progress: progress),
       );
 
-      _setUploadStatus(message: 'Upload complete. Waiting for playback ID...');
+      _setUploadStatus(message: 'Processing your video...');
       final playbackId = await _muxClient.waitForPlaybackId(upload.id);
-      uploadedVideos.insert(
-        0,
-        UploadedVideo(
-          creator: widget.username,
-          title: videoTitle,
-          description: '',
-          filename: file.name,
-          playbackId: playbackId,
-          uploadedAt: uploadedAt,
-        ),
+      final uploadedVideo = UploadedVideo(
+        creator: widget.username,
+        title: videoTitle,
+        description: '',
+        filename: file.name,
+        playbackId: playbackId,
+        uploadedAt: uploadedAt,
       );
+      uploadedVideos.insert(0, uploadedVideo);
+      setState(() => _completedUploadVideo = uploadedVideo);
 
-      _setUploadStatus(message: 'Ready to watch. Playback ID: $playbackId');
+      _setUploadStatus(message: 'Your video is ready.', isReady: true);
       await _resetUploadForm(closeForm: true);
     } catch (error) {
-      _setUploadStatus(message: 'Upload failed: $error', hasError: true);
+      // TODO: Persist the raw upload error/response to an upload logs collection.
+      _setUploadStatus(
+        message: 'Upload failed. Please try again.',
+        hasError: true,
+      );
     } finally {
       setState(() => _uploading = false);
     }
@@ -324,32 +350,46 @@ class _CreatorScreenState extends State<CreatorScreen> {
     UploadProgress? progress,
     String? message,
     bool hasError = false,
+    bool isReady = false,
   }) {
     final nextProgress = progress ?? _progress;
     final nextMessage = message ?? _message;
     setState(() {
       _progress = nextProgress;
       _message = nextMessage;
+      _uploadFailed = hasError;
     });
     _uploadDialogData.value = _UploadDialogData(
       progress: nextProgress,
       message: nextMessage,
       hasError: hasError,
+      isReady: isReady,
     );
+  }
+
+  Future<void> _viewCompletedUpload() async {
+    final video = _completedUploadVideo;
+    if (video == null) return;
+    Navigator.of(context).pop();
+    setState(() => _completedUploadVideo = null);
+    await _playUploadedVideo(video);
   }
 
   Future<void> _uploadWithGlow() async {
     if (!mounted) return;
     _uploadDialogData.value = const _UploadDialogData(
-      message: 'Creating Mux direct upload...',
+      message: 'Preparing your upload...',
     );
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _UploadingGlowDialog(data: _uploadDialogData),
+      builder: (_) => _UploadingGlowDialog(
+        data: _uploadDialogData,
+        onViewVideo: _viewCompletedUpload,
+      ),
     );
     await _uploadSelectedVideo();
-    if (mounted && _message?.startsWith('Upload failed:') != true) {
+    if (mounted && !_uploadFailed && _completedUploadVideo == null) {
       Navigator.of(context).pop();
     }
   }
@@ -401,6 +441,7 @@ class _CreatorScreenState extends State<CreatorScreen> {
       _uploadStep = 0;
       _progress = null;
       _message = null;
+      _uploadFailed = false;
       if (closeForm) _showUploadForm = false;
     });
     await oldController?.dispose();
@@ -475,9 +516,6 @@ class _CreatorScreenState extends State<CreatorScreen> {
     final myVideos = uploadedVideos
         .where((video) => video.creator == widget.username)
         .toList();
-    final playbackController = _creatorPlaybackController;
-    final selectedVideo = _selectedUploadedVideo;
-
     return Stack(
       key: const ValueKey('my-videos'),
       clipBehavior: Clip.none,
@@ -578,19 +616,6 @@ class _CreatorScreenState extends State<CreatorScreen> {
             ],
           ),
         ),
-        if (_creatorMiniPlayer &&
-            selectedVideo != null &&
-            playbackController != null)
-          Positioned(
-            right: 16,
-            bottom: 16,
-            child: MiniVideoPlayer(
-              video: selectedVideo,
-              controller: playbackController,
-              onExpand: _expandCreatorMiniPlayer,
-              onClose: _closeCreatorPlayer,
-            ),
-          ),
       ],
     );
   }
@@ -672,7 +697,6 @@ class _CreatorScreenState extends State<CreatorScreen> {
   }
 
   Widget _buildVideoStep(PlatformFile? selectedFile, bool canUpload) {
-    final uploadFailed = _message?.startsWith('Upload failed:') ?? false;
     final pickingVideo = _pickingVideo;
 
     return Column(
@@ -708,7 +732,7 @@ class _CreatorScreenState extends State<CreatorScreen> {
           FilledButton.icon(
             onPressed: canUpload ? _uploadWithGlow : null,
             icon: const Icon(Icons.cloud_upload),
-            label: Text(uploadFailed ? 'Retry upload' : 'Upload video'),
+            label: Text(_uploadFailed ? 'Retry upload' : 'Upload video'),
           ),
         ] else
           const Expanded(
@@ -963,17 +987,24 @@ class _FileErrorBanner extends StatelessWidget {
 }
 
 class _UploadDialogData {
-  const _UploadDialogData({this.progress, this.message, this.hasError = false});
+  const _UploadDialogData({
+    this.progress,
+    this.message,
+    this.hasError = false,
+    this.isReady = false,
+  });
 
   final UploadProgress? progress;
   final String? message;
   final bool hasError;
+  final bool isReady;
 }
 
 class _UploadingGlowDialog extends StatefulWidget {
-  const _UploadingGlowDialog({required this.data});
+  const _UploadingGlowDialog({required this.data, required this.onViewVideo});
 
   final ValueListenable<_UploadDialogData> data;
+  final VoidCallback onViewVideo;
 
   @override
   State<_UploadingGlowDialog> createState() => _UploadingGlowDialogState();
@@ -1005,92 +1036,150 @@ class _UploadingGlowDialogState extends State<_UploadingGlowDialog>
       child: AnimatedBuilder(
         animation: _controller,
         builder: (context, child) {
+          final pulse = Curves.easeInOut.transform(_controller.value);
+          final colorScheme = Theme.of(context).colorScheme;
+
           return Container(
-            padding: const EdgeInsets.all(3),
+            padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(30),
-              gradient: SweepGradient(
-                transform: GradientRotation(_controller.value * 6.28318),
-                colors: const [
-                  Color(0xFF6D5DF6),
-                  Color(0xFF00D4FF),
-                  Color(0xFFFF7AD9),
-                  Color(0xFF6D5DF6),
-                ],
-              ),
+              borderRadius: BorderRadius.circular(32),
+              color: Theme.of(context).scaffoldBackgroundColor,
               boxShadow: [
                 BoxShadow(
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.primary.withValues(alpha: 0.5),
-                  blurRadius: 28,
+                  color: colorScheme.primary.withValues(
+                    alpha: 0.22 + pulse * 0.16,
+                  ),
+                  blurRadius: 40 + pulse * 18,
+                  spreadRadius: 3 + pulse * 4,
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  blurRadius: 30,
+                  offset: const Offset(0, 18),
                 ),
               ],
             ),
-            child: Container(
-              padding: const EdgeInsets.all(28),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(27),
-                color: Theme.of(context).scaffoldBackgroundColor,
-              ),
-              child: ValueListenableBuilder<_UploadDialogData>(
-                valueListenable: widget.data,
-                builder: (context, data, _) {
-                  final progress = data.progress;
-                  final progressLabel = progress?.label;
+            child: ValueListenableBuilder<_UploadDialogData>(
+              valueListenable: widget.data,
+              builder: (context, data, _) {
+                final progress = data.progress;
+                final progressLabel = progress?.label;
 
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        data.hasError
-                            ? Icons.error_outline
-                            : Icons.cloud_upload,
-                        size: 54,
-                        color: data.hasError
-                            ? Theme.of(context).colorScheme.error
-                            : null,
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _UploadPulseSphere(
+                      progress: pulse,
+                      hasError: data.hasError,
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      data.hasError ? 'Upload failed' : 'Uploading video',
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
                       ),
-                      const SizedBox(height: 14),
-                      Text(
-                        data.hasError ? 'Upload failed' : 'Uploading to Mux',
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      LinearProgressIndicator(value: progress?.fraction),
-                      const SizedBox(height: 10),
-                      Text(
-                        progressLabel ?? data.message ?? 'Preparing upload...',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      if (progressLabel != null && data.message != null) ...[
-                        const SizedBox(height: 6),
-                        Text(data.message!, textAlign: TextAlign.center),
-                      ],
-                      if (data.hasError) ...[
-                        const SizedBox(height: 16),
-                        FilledButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          child: const Text('Close'),
-                        ),
-                      ] else ...[
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Keep this screen open while we prepare playback.',
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    LinearProgressIndicator(value: progress?.fraction),
+                    const SizedBox(height: 10),
+                    Text(
+                      progressLabel ??
+                          data.message ??
+                          'Preparing your upload...',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    if (progressLabel != null && data.message != null) ...[
+                      const SizedBox(height: 6),
+                      Text(data.message!, textAlign: TextAlign.center),
                     ],
-                  );
-                },
-              ),
+                    if (data.isReady) ...[
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        onPressed: widget.onViewVideo,
+                        icon: const Icon(Icons.play_arrow),
+                        label: const Text('View video'),
+                      ),
+                    ] else if (data.hasError) ...[
+                      const SizedBox(height: 16),
+                      FilledButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Close'),
+                      ),
+                    ] else ...[
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Keep this screen open while we prepare playback.',
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ],
+                );
+              },
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _UploadPulseSphere extends StatelessWidget {
+  const _UploadPulseSphere({required this.progress, required this.hasError});
+
+  final double progress;
+  final bool hasError;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final baseColor = hasError ? colorScheme.error : colorScheme.primary;
+    final size = 76 + progress * 8;
+
+    return SizedBox(
+      width: 118,
+      height: 118,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            width: 108 + progress * 8,
+            height: 108 + progress * 8,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: baseColor.withValues(alpha: 0.08),
+              boxShadow: [
+                BoxShadow(
+                  color: baseColor.withValues(alpha: 0.28 + progress * 0.18),
+                  blurRadius: 28 + progress * 18,
+                  spreadRadius: 2 + progress * 5,
+                ),
+              ],
+            ),
+          ),
+          Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                center: const Alignment(-0.35, -0.45),
+                radius: 0.95,
+                colors: [
+                  Colors.white.withValues(alpha: 0.95),
+                  baseColor.withValues(alpha: 0.72),
+                  baseColor.withValues(alpha: 0.95),
+                ],
+              ),
+            ),
+            child: Icon(
+              hasError ? Icons.error_outline : Icons.cloud_upload,
+              color: hasError ? colorScheme.onError : colorScheme.onPrimary,
+              size: 32,
+            ),
+          ),
+        ],
       ),
     );
   }

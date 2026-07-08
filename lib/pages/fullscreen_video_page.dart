@@ -1,19 +1,28 @@
 part of '../main.dart';
 
 class FullscreenVideoScreen extends StatefulWidget {
-  const FullscreenVideoScreen({super.key, required this.controller});
+  const FullscreenVideoScreen({
+    super.key,
+    required this.controller,
+    this.onNextVideo,
+  });
 
   final VideoPlayerController controller;
+  final Future<VideoPlayerController?> Function()? onNextVideo;
 
   @override
   State<FullscreenVideoScreen> createState() => _FullscreenVideoScreenState();
 }
 
 class _FullscreenVideoScreenState extends State<FullscreenVideoScreen> {
+  var _horizontalDrag = 0.0;
+  late VideoPlayerController _controller;
+
   @override
   void initState() {
     super.initState();
-    widget.controller.addListener(_refreshControls);
+    _controller = widget.controller;
+    _controller.addListener(_refreshControls);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     SystemChrome.setPreferredOrientations(const [
       DeviceOrientation.landscapeLeft,
@@ -23,7 +32,7 @@ class _FullscreenVideoScreenState extends State<FullscreenVideoScreen> {
 
   @override
   void dispose() {
-    widget.controller.removeListener(_refreshControls);
+    _controller.removeListener(_refreshControls);
     super.dispose();
   }
 
@@ -36,22 +45,55 @@ class _FullscreenVideoScreenState extends State<FullscreenVideoScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Center(
-              child: AspectRatio(
-                aspectRatio: widget.controller.value.aspectRatio,
-                child: VideoPlayer(widget.controller),
+        child: GestureDetector(
+          onHorizontalDragUpdate: (details) =>
+              _horizontalDrag += details.delta.dx,
+          onHorizontalDragEnd: (_) async {
+            if (_horizontalDrag < -90) {
+              final nextController = await widget.onNextVideo?.call();
+              if (mounted && nextController != null) {
+                _controller.removeListener(_refreshControls);
+                _controller = nextController;
+                _controller.addListener(_refreshControls);
+                setState(() {});
+              }
+            }
+            _horizontalDrag = 0;
+          },
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Center(
+                child: AspectRatio(
+                  aspectRatio: _controller.value.aspectRatio,
+                  child: VideoPlayer(_controller),
+                ),
               ),
-            ),
-            VideoControls(
-              controller: widget.controller,
-              onFullscreen: () => Navigator.of(context).pop(),
-              fullscreenIcon: Icons.fullscreen_exit,
-              fullscreenTooltip: 'Exit fullscreen',
-            ),
-          ],
+              Positioned(
+                right: 18,
+                top: 18,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.48),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    child: Text(
+                      'Swipe left for next',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+              VideoControls(
+                controller: _controller,
+                onFullscreen: () => Navigator.of(context).pop(),
+                fullscreenIcon: Icons.fullscreen_exit,
+                fullscreenTooltip: 'Exit fullscreen',
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -2,6 +2,51 @@ part of '../main.dart';
 
 enum WatchExitAction { close, minimize }
 
+Route<WatchExitAction> watchVideoRoute({
+  required UploadedVideo video,
+  required VideoPlayerController controller,
+  required Future<void> initializeFuture,
+  bool expandFromMini = false,
+}) {
+  return PageRouteBuilder<WatchExitAction>(
+    transitionDuration: Duration(milliseconds: expandFromMini ? 360 : 220),
+    reverseTransitionDuration: const Duration(milliseconds: 180),
+    pageBuilder: (_, _, _) => WatchVideoScreen(
+      video: video,
+      controller: controller,
+      initializeFuture: initializeFuture,
+    ),
+    transitionsBuilder: (_, animation, _, child) {
+      if (!expandFromMini) {
+        return FadeTransition(opacity: animation, child: child);
+      }
+
+      final curved = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      );
+      final offset = Tween<Offset>(
+        begin: const Offset(0.28, 0.42),
+        end: Offset.zero,
+      ).animate(curved);
+      final scale = Tween<double>(begin: 0.48, end: 1).animate(curved);
+
+      return FadeTransition(
+        opacity: curved,
+        child: SlideTransition(
+          position: offset,
+          child: ScaleTransition(
+            scale: scale,
+            alignment: Alignment.bottomRight,
+            child: child,
+          ),
+        ),
+      );
+    },
+  );
+}
+
 class WatchVideoScreen extends StatefulWidget {
   const WatchVideoScreen({
     super.key,
@@ -23,30 +68,46 @@ class _WatchVideoScreenState extends State<WatchVideoScreen> {
   final _detailsScrollController = ScrollController();
   final _commentController = TextEditingController();
   final _expandedReplies = <int>{};
+  final _replyingComments = <int>{};
   final _commentsKey = GlobalKey();
+  late UploadedVideo _video;
+  late VideoPlayerController _controller;
+  late Future<void> _initializeFuture;
+  var _ownsController = false;
   bool _hearted = false;
   bool _descriptionExpanded = false;
 
   @override
   void initState() {
     super.initState();
+    _video = widget.video;
+    _controller = widget.controller;
+    _initializeFuture = widget.initializeFuture;
   }
 
   @override
   void dispose() {
     _detailsScrollController.dispose();
     _commentController.dispose();
+    if (_ownsController) _controller.dispose();
     super.dispose();
   }
 
   void _minimize() {
+    if (_ownsController) {
+      Navigator.of(context).pop(WatchExitAction.close);
+      return;
+    }
     Navigator.of(context).pop(WatchExitAction.minimize);
   }
 
   Future<void> _openFullscreen() async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
-        builder: (_) => FullscreenVideoScreen(controller: widget.controller),
+        builder: (_) => FullscreenVideoScreen(
+          controller: _controller,
+          onNextVideo: _playNextVideo,
+        ),
       ),
     );
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -66,9 +127,58 @@ class _WatchVideoScreenState extends State<WatchVideoScreen> {
     );
   }
 
+  List<UploadedVideo> get _nextVideos {
+    final videos = [...uploadedVideos]
+      ..sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
+    return videos
+        .where((video) => video.playbackId != _video.playbackId)
+        .toList();
+  }
+
+  Future<VideoPlayerController?> _playNextVideo() async {
+    final nextVideos = _nextVideos;
+    if (nextVideos.isEmpty) return null;
+    return _playSuggestedVideo(nextVideos.first, disposePrevious: false);
+  }
+
+  Future<VideoPlayerController> _playSuggestedVideo(
+    UploadedVideo video, {
+    bool disposePrevious = true,
+  }) async {
+    final oldController = _controller;
+    final shouldDisposeOld = _ownsController;
+    final controller = VideoPlayerController.networkUrl(video.playbackUri);
+    final initializeFuture = controller.initialize().then(
+      (_) => controller.play(),
+    );
+
+    setState(() {
+      _video = video;
+      _controller = controller;
+      _initializeFuture = initializeFuture;
+      _ownsController = true;
+      _hearted = false;
+      _descriptionExpanded = false;
+      _expandedReplies.clear();
+      _replyingComments.clear();
+    });
+    if (_detailsScrollController.hasClients) {
+      _detailsScrollController.jumpTo(0);
+    }
+    if (shouldDisposeOld && disposePrevious) {
+      await oldController.dispose();
+    } else {
+      await oldController.pause();
+    }
+    return controller;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final video = widget.video;
+    final video = _video;
+    final width = MediaQuery.sizeOf(context).width;
+    final videoHeight = (width * 0.64).clamp(232.0, 340.0);
+    final dragProgress = (_dragDistance / 420).clamp(0.0, 1.0);
 
     return PopScope<void>(
       canPop: false,
@@ -76,25 +186,16 @@ class _WatchVideoScreenState extends State<WatchVideoScreen> {
         if (!didPop) _minimize();
       },
       child: Scaffold(
-        body: Column(
+        body: Stack(
           children: [
-            _PinnedVideoHeader(
-              video: video,
-              controller: widget.controller,
-              initializeFuture: widget.initializeFuture,
-              onMinimize: _minimize,
-              onFullscreen: _openFullscreen,
-              onDragUpdate: (details) => _dragDistance += details.delta.dy,
-              onDragEnd: () {
-                if (_dragDistance > 90) _minimize();
-                _dragDistance = 0;
-              },
-            ),
-            Expanded(
+            AnimatedOpacity(
+              opacity: 1 - (dragProgress * 0.9),
+              duration: const Duration(milliseconds: 80),
               child: ListView(
                 controller: _detailsScrollController,
-                padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+                padding: EdgeInsets.fromLTRB(18, videoHeight + 18, 18, 28),
                 children: [
+                  const SizedBox(height: 16),
                   Text(
                     video.title,
                     style: Theme.of(context).textTheme.headlineSmall,
@@ -117,7 +218,12 @@ class _WatchVideoScreenState extends State<WatchVideoScreen> {
                       () => _descriptionExpanded = !_descriptionExpanded,
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 18),
+                  _NextVideosSection(
+                    videos: _nextVideos,
+                    onPlay: _playSuggestedVideo,
+                  ),
+                  const SizedBox(height: 22),
                   TextField(
                     controller: _commentController,
                     decoration: InputDecoration(
@@ -153,8 +259,42 @@ class _WatchVideoScreenState extends State<WatchVideoScreen> {
                           }
                         });
                       },
+                      replying: _replyingComments.contains(i),
+                      onReply: () {
+                        setState(() {
+                          if (!_replyingComments.remove(i)) {
+                            _replyingComments.add(i);
+                          }
+                        });
+                      },
                     ),
                 ],
+              ),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              child: _PinnedVideoHeader(
+                video: video,
+                controller: _controller,
+                initializeFuture: _initializeFuture,
+                onMinimize: _minimize,
+                onFullscreen: _openFullscreen,
+                dragDistance: _dragDistance,
+                expandedHeight: videoHeight,
+                onDragUpdate: (details) {
+                  setState(() {
+                    _dragDistance = (_dragDistance + details.delta.dy).clamp(
+                      0.0,
+                      420.0,
+                    );
+                  });
+                },
+                onDragEnd: () {
+                  if (_dragDistance > 90) _minimize();
+                  setState(() => _dragDistance = 0);
+                },
               ),
             ),
           ],
@@ -171,6 +311,8 @@ class _PinnedVideoHeader extends StatelessWidget {
     required this.initializeFuture,
     required this.onMinimize,
     required this.onFullscreen,
+    required this.dragDistance,
+    required this.expandedHeight,
     required this.onDragUpdate,
     required this.onDragEnd,
   });
@@ -180,77 +322,134 @@ class _PinnedVideoHeader extends StatelessWidget {
   final Future<void> initializeFuture;
   final VoidCallback onMinimize;
   final VoidCallback onFullscreen;
+  final double dragDistance;
+  final double expandedHeight;
   final ValueChanged<DragUpdateDetails> onDragUpdate;
   final VoidCallback onDragEnd;
 
   @override
   Widget build(BuildContext context) {
+    final progress = (dragDistance / 420).clamp(0.0, 1.0);
+    final size = MediaQuery.sizeOf(context);
+    final safePadding = MediaQuery.paddingOf(context);
+    final scale = 1 - (progress * 0.52);
+    final finalWidth = size.width * scale;
+    final finalHeight = expandedHeight * scale;
+    final targetX = (size.width - finalWidth - 16).clamp(0.0, size.width);
+    final targetY =
+        (size.height - safePadding.top - safePadding.bottom - finalHeight - 16)
+            .clamp(0.0, size.height);
+    final translateX = targetX * progress;
+    final translateY = targetY * progress;
+
     return SafeArea(
       bottom: false,
-      child: GestureDetector(
-        onVerticalDragUpdate: onDragUpdate,
-        onVerticalDragEnd: (_) => onDragEnd(),
-        child: FutureBuilder<void>(
-          future: initializeFuture,
-          builder: (context, snapshot) {
-            final hasError = snapshot.hasError;
-            final isReady =
-                snapshot.connectionState == ConnectionState.done &&
-                !hasError &&
-                controller.value.isInitialized;
-
-            return AspectRatio(
-              aspectRatio: isReady ? controller.value.aspectRatio : 16 / 9,
-              child: ColoredBox(
-                color: Colors.black,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (isReady)
-                      VideoPlayer(controller)
-                    else
-                      Image.network(video.thumbnailUrl, fit: BoxFit.cover),
-                    if (!isReady)
-                      ColoredBox(
-                        color: Colors.black.withValues(alpha: 0.58),
-                        child: Center(
-                          child: hasError
-                              ? const Text(
-                                  'Could not load video.',
-                                  style: TextStyle(color: Colors.white),
-                                )
-                              : const Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    CircularProgressIndicator(),
-                                    SizedBox(height: 12),
-                                    Text(
-                                      'Loading video...',
-                                      style: TextStyle(color: Colors.white),
-                                    ),
-                                  ],
-                                ),
+      child: SizedBox(
+        height: expandedHeight,
+        child: GestureDetector(
+          onVerticalDragUpdate: onDragUpdate,
+          onVerticalDragEnd: (_) => onDragEnd(),
+          child: Transform.translate(
+            offset: Offset(translateX, translateY),
+            child: Transform.scale(
+              scale: scale,
+              alignment: Alignment.topLeft,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(18 * progress),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    boxShadow: [
+                      if (progress > 0)
+                        BoxShadow(
+                          color: Colors.black.withValues(
+                            alpha: 0.35 * progress,
+                          ),
+                          blurRadius: 24 * progress,
                         ),
-                      ),
-                    Positioned(
-                      left: 8,
-                      top: 8,
-                      child: IconButton.filledTonal(
-                        tooltip: 'Mini player',
-                        onPressed: onMinimize,
-                        icon: const Icon(Icons.keyboard_arrow_down),
-                      ),
-                    ),
-                    if (isReady)
-                      VideoControls(
-                        controller: controller,
-                        onFullscreen: onFullscreen,
-                      ),
-                  ],
+                    ],
+                  ),
+                  child: FutureBuilder<void>(
+                    future: initializeFuture,
+                    builder: (context, snapshot) {
+                      final hasError = snapshot.hasError;
+                      final isReady =
+                          snapshot.connectionState == ConnectionState.done &&
+                          !hasError &&
+                          controller.value.isInitialized;
+
+                      return SizedBox(
+                        width: double.infinity,
+                        height: expandedHeight,
+                        child: ColoredBox(
+                          color: Colors.black,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              if (isReady)
+                                FittedBox(
+                                  fit: BoxFit.cover,
+                                  clipBehavior: Clip.hardEdge,
+                                  child: SizedBox(
+                                    width: controller.value.size.width,
+                                    height: controller.value.size.height,
+                                    child: VideoPlayer(controller),
+                                  ),
+                                )
+                              else
+                                Image.network(
+                                  video.thumbnailUrl,
+                                  fit: BoxFit.cover,
+                                ),
+                              if (!isReady)
+                                ColoredBox(
+                                  color: Colors.black.withValues(alpha: 0.58),
+                                  child: Center(
+                                    child: hasError
+                                        ? const Text(
+                                            'Could not load video.',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                            ),
+                                          )
+                                        : const Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              CircularProgressIndicator(),
+                                              SizedBox(height: 12),
+                                              Text(
+                                                'Loading video...',
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                  ),
+                                ),
+                              Positioned(
+                                left: 8,
+                                top: 8,
+                                child: IconButton.filledTonal(
+                                  tooltip: 'Mini player',
+                                  onPressed: onMinimize,
+                                  icon: const Icon(Icons.keyboard_arrow_down),
+                                ),
+                              ),
+                              if (isReady)
+                                VideoControls(
+                                  controller: controller,
+                                  onFullscreen: onFullscreen,
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ),
-            );
-          },
+            ),
+          ),
         ),
       ),
     );
@@ -367,21 +566,27 @@ class _DescriptionBubble extends StatelessWidget {
         children: [
           Text('Description', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.18),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Text(
-              video.displayDescription,
-              maxLines: expanded ? null : 4,
-              overflow: expanded ? TextOverflow.visible : TextOverflow.fade,
-              softWrap: true,
-              style: const TextStyle(fontFamily: 'monospace', height: 1.45),
-            ),
+          Text(
+            video.displayDescription,
+            maxLines: expanded ? null : 4,
+            overflow: expanded ? TextOverflow.visible : TextOverflow.fade,
+            softWrap: true,
+            style: const TextStyle(fontFamily: 'monospace', height: 1.45),
           ),
+          if (expanded) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Text(
+                video.playbackId,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.58),
+                ),
+              ),
+            ),
+          ],
           Center(
             child: TextButton.icon(
               onPressed: onToggleExpanded,
@@ -389,18 +594,6 @@ class _DescriptionBubble extends StatelessWidget {
                 expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
               ),
               label: Text(expanded ? 'View less' : 'View more'),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerRight,
-            child: Text(
-              video.playbackId,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: Theme.of(
-                  context,
-                ).colorScheme.onSurface.withValues(alpha: 0.58),
-              ),
             ),
           ),
         ],
@@ -414,11 +607,15 @@ class _CommentBubble extends StatelessWidget {
     required this.comment,
     required this.repliesExpanded,
     required this.onToggleReplies,
+    required this.replying,
+    required this.onReply,
   });
 
   final MockComment comment;
   final bool repliesExpanded;
   final VoidCallback onToggleReplies;
+  final bool replying;
+  final VoidCallback onReply;
 
   @override
   Widget build(BuildContext context) {
@@ -459,9 +656,9 @@ class _CommentBubble extends StatelessWidget {
                       Row(
                         children: [
                           TextButton.icon(
-                            onPressed: () {},
+                            onPressed: onReply,
                             icon: const Icon(Icons.reply, size: 16),
-                            label: const Text('Reply'),
+                            label: Text(replying ? 'Cancel reply' : 'Reply'),
                           ),
                           TextButton.icon(
                             onPressed: () {},
@@ -476,6 +673,23 @@ class _CommentBubble extends StatelessWidget {
               ),
             ],
           ),
+          if (replying) ...[
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.only(left: 54),
+              child: TextField(
+                minLines: 1,
+                maxLines: 3,
+                decoration: InputDecoration(
+                  hintText: 'Reply to ${comment.author}...',
+                  suffixIcon: IconButton(
+                    onPressed: () {},
+                    icon: const Icon(Icons.send),
+                  ),
+                ),
+              ),
+            ),
+          ],
           if (replies.isNotEmpty) ...[
             const SizedBox(height: 8),
             Padding(
@@ -500,6 +714,110 @@ class _CommentBubble extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+class _NextVideosSection extends StatelessWidget {
+  const _NextVideosSection({required this.videos, required this.onPlay});
+
+  final List<UploadedVideo> videos;
+  final ValueChanged<UploadedVideo> onPlay;
+
+  @override
+  Widget build(BuildContext context) {
+    final suggestions = videos.take(4).toList();
+    if (suggestions.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Next videos', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 10),
+        for (final video in suggestions)
+          Card(
+            clipBehavior: Clip.antiAlias,
+            margin: const EdgeInsets.only(bottom: 10),
+            child: InkWell(
+              onTap: () => onPlay(video),
+              child: SizedBox(
+                height: 96,
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 156,
+                      height: double.infinity,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Image.network(
+                            video.thumbnailUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => ColoredBox(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerHighest,
+                              child: Icon(
+                                Icons.movie_outlined,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                            ),
+                          ),
+                          Center(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.48),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Padding(
+                                padding: EdgeInsets.all(6),
+                                child: Icon(
+                                  Icons.play_arrow,
+                                  color: Colors.white,
+                                  size: 22,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              video.displayTitle,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const Spacer(),
+                            Text(
+                              video.creator,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              '${video.viewsLabel} • ${video.formattedUploadDate}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -33,6 +34,7 @@ Future<void> main() async {
 final uploadedVideos = <UploadedVideo>[];
 final appThemeMode = ValueNotifier<ThemeMode>(ThemeMode.dark);
 final appSession = ValueNotifier<String?>(null);
+final appMiniPlayer = ValueNotifier<AppMiniPlayer?>(null);
 
 const muxTokenId = String.fromEnvironment('MUX_TOKEN_ID');
 const muxTokenSecret = String.fromEnvironment('MUX_TOKEN_SECRET');
@@ -85,6 +87,29 @@ class MuxDemoApp extends StatelessWidget {
               theme: _buildAppTheme(Brightness.light),
               darkTheme: _buildAppTheme(Brightness.dark),
               home: _homeForSession(username),
+              builder: (context, child) {
+                return ValueListenableBuilder<AppMiniPlayer?>(
+                  valueListenable: appMiniPlayer,
+                  builder: (context, miniPlayer, _) {
+                    return Stack(
+                      children: [
+                        ?child,
+                        if (miniPlayer != null)
+                          Positioned(
+                            right: 16,
+                            bottom: 16 + MediaQuery.paddingOf(context).bottom,
+                            child: MiniVideoPlayer(
+                              video: miniPlayer.video,
+                              controller: miniPlayer.controller,
+                              onExpand: miniPlayer.onExpand,
+                              onClose: miniPlayer.onClose,
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                );
+              },
             );
           },
         );
@@ -143,4 +168,18 @@ class MuxDemoApp extends StatelessWidget {
       useMaterial3: true,
     );
   }
+}
+
+class AppMiniPlayer {
+  const AppMiniPlayer({
+    required this.video,
+    required this.controller,
+    required this.onExpand,
+    required this.onClose,
+  });
+
+  final UploadedVideo video;
+  final VideoPlayerController controller;
+  final VoidCallback onExpand;
+  final VoidCallback onClose;
 }
