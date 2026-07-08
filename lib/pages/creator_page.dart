@@ -393,6 +393,7 @@ class _CreatorScreenState extends State<CreatorScreen> {
         uploadedAt: uploadedAt,
       );
       uploadedVideos.insert(0, uploadedVideo);
+      await savePersistedVideo(uploadedVideo);
       setState(() => _completedUploadVideo = uploadedVideo);
 
       _setUploadStatus(message: 'Your video is ready.', isReady: true);

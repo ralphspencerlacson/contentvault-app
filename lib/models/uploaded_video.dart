@@ -17,6 +17,34 @@ class UploadedVideo {
   final String playbackId;
   final DateTime uploadedAt;
 
+  factory UploadedVideo.fromFirestore(Map<String, dynamic> data) {
+    final createdAt = data['createdAt'];
+    final uploadedAt = createdAt is Timestamp
+        ? createdAt.toDate()
+        : DateTime.tryParse('${data['createdAt']}') ?? DateTime.now();
+
+    return UploadedVideo(
+      creator: data['creatorUsername'] as String? ?? 'creator1',
+      title: data['title'] as String? ?? 'Untitled video',
+      description: '',
+      filename: '',
+      playbackId: data['playbackId'] as String? ?? '',
+      uploadedAt: uploadedAt,
+    );
+  }
+
+  Map<String, dynamic> toFirestore() {
+    return {
+      'title': title,
+      'creatorId': creatorIdForUsername(creator),
+      'creatorUsername': creator,
+      'playbackId': playbackId,
+      'playbackUrl': playbackUri.toString(),
+      'thumbnailUrl': thumbnailUrl,
+      'createdAt': Timestamp.fromDate(uploadedAt),
+    };
+  }
+
   Uri get playbackUri => Uri.parse('https://stream.mux.com/$playbackId.m3u8');
 
   String get thumbnailUrl =>

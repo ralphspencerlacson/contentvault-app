@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +12,8 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import 'package:visibility_detector/visibility_detector.dart';
+
+import 'firebase_options.dart';
 
 part 'common/mini_video_player.dart';
 part 'common/settings_drawer.dart';
@@ -25,10 +29,13 @@ part 'pages/settings_page.dart';
 part 'pages/subscriber_page.dart';
 part 'pages/watch_video_page.dart';
 part 'requests/mux_client.dart';
+part 'requests/video_repository.dart';
 part 'utils/upload_formatters.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await loadPersistedVideos();
   appSession.value = await loadSavedSession();
   runApp(const MuxDemoApp());
 }

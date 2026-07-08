@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "210169955461",
+    "project_id": "content-vault-4bbff",
+    "storage_bucket": "content-vault-4bbff.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:210169955461:android:84ae60bed3ead8433b95ec",
+        "android_client_info": {
+          "package_name": "com.example.content_vault"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAkCAPOPgIQ7yesHD0SHhoXrQStlKBhl6s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
